@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 import mysql.connector
-
 def login_window(on_success):
     # ---------- Database Connection ----------
     def connect_db():
@@ -12,14 +11,11 @@ def login_window(on_success):
             password="mkkapri",
             database="oreo"
         )
-
     # ---------- Main Window ----------
     root = tk.Tk()
     root.title("Oreo Login")
-    # root.geometry("400x500")
     root.state("zoomed")
     root.config(bg="white")
-
     # ---------- Load Logo ----------
     try:
         logo_img = Image.open("OREO.png")
@@ -27,16 +23,13 @@ def login_window(on_success):
         logo = ImageTk.PhotoImage(logo_img)
     except:
         logo = None
-
     # ---------- Switch Frames ----------
     def open_register():
         login_frame.pack_forget()
         register_frame.pack(pady=20)
-
     def open_login():
         register_frame.pack_forget()
         login_frame.pack(pady=20)
-
     # ---------- Login Function ----------
     def login_user():
         username = username_entry.get()
@@ -44,21 +37,18 @@ def login_window(on_success):
         if not username or not password:
             messagebox.showwarning("Input Error", "Please fill all fields!")
             return
-
         db = connect_db()
         cursor = db.cursor()
         cursor.execute("SELECT user_id, username FROM users WHERE username=%s AND password=%s",
                        (username, password))
         user = cursor.fetchone()
         db.close()
-
         if user:
             user_id, username = user
             root.destroy()  # Close login window
             on_success(user_id, username)  # Call Dashboard callback
         else:
             messagebox.showerror("Error", "Invalid username or password")
-
     # ---------- Register Function ----------
     def register_user():
         fullname = full_name_entry.get()
@@ -66,11 +56,9 @@ def login_window(on_success):
         phone = phone_entry.get()
         password = reg_password_entry.get()
         email = email_entry.get()
-
         if not fullname or not address or not phone or not password:
             messagebox.showwarning("Input Error", "Please fill all fields!")
             return
-
         db = connect_db()
         cursor = db.cursor()
         try:
@@ -85,7 +73,6 @@ def login_window(on_success):
             messagebox.showerror("Error", f"Database Error: {err}")
         finally:
             db.close()
-
     # ---------- Login Frame ----------
     login_frame = tk.Frame(root, bg="white")
     if logo:
@@ -105,7 +92,6 @@ def login_window(on_success):
     tk.Button(login_frame, text="Register", bg="white", fg="#7B0000", font=("Arial", 10, "bold"),
               relief="flat", command=open_register).pack(pady=5)
     login_frame.pack(pady=20)
-
     # ---------- Register Frame ----------
     register_frame = tk.Frame(root, bg="white")
     if logo:
@@ -137,5 +123,4 @@ def login_window(on_success):
               width=20, relief="flat", command=register_user).pack(pady=10)
     tk.Button(register_frame, text="Back to Login", bg="white", fg="#7B0000", font=("Arial", 10, "bold"),
               relief="flat", command=open_login).pack()
-
     root.mainloop()
