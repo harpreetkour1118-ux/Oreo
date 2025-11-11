@@ -2,7 +2,8 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 import mysql.connector
-import io, requests, os
+from database import record_order_effects
+from datetime import datetime
 
 # DB Connect
 def connect_db():
@@ -79,6 +80,34 @@ class CheckoutWindow(tk.Toplevel):
 
         self.load_cart()
 
+    # Basic payment validation
+    def _validate_payment_inputs(self):
+        card = (self.card_entry.get() or "").replace(" ", "")
+        cvv = (self.cvv_entry.get() or "").strip()
+        exp = (self.exp_entry.get() or "").strip()
+
+        if not card.isdigit() or len(card) not in (13, 15, 16):
+            messagebox.showerror("Payment Error", "Invalid card number.")
+            return False
+        if not cvv.isdigit() or len(cvv) not in (3, 4):
+            messagebox.showerror("Payment Error", "Invalid CVV.")
+            return False
+        try:
+            mm, yyyy = exp.split("/")
+            mm = int(mm)
+            yyyy = int(yyyy)
+            if mm < 1 or mm > 12:
+                raise ValueError
+            # Consider card valid through the end of the month
+            now = datetime.now()
+            if (yyyy < now.year) or (yyyy == now.year and mm < now.month):
+                messagebox.showerror("Payment Error", "Card is expired.")
+                return False
+        except Exception:
+            messagebox.showerror("Payment Error", "Expiry must be in mm/yyyy format.")
+            return False
+        return True
+
     # Load cart data
     def load_cart(self):
         db = connect_db()
@@ -107,27 +136,90 @@ class CheckoutWindow(tk.Toplevel):
         if not self.cart_items:
             messagebox.showwarning("Warning", "Cart is empty!")
             return
+        if not self._validate_payment_inputs():
+            return
 
         db = connect_db()
         cursor = db.cursor()
+        try:
+            # Use transaction
+            db.start_transaction()
 
-        # Insert order
-        cursor.execute("INSERT INTO orders (user_id, total_amount, status) VALUES (%s, %s, 'Pending')",
-                       (self.user_id, self.total))
-        order_id = cursor.lastrowid
+            # Refresh latest cart from DB and verify stock
+            cursor.execute(
+                """
+                SELECT c.product_id, c.quantity, p.name, p.price, p.stock
+                FROM cart c
+                JOIN product p ON c.product_id = p.product_id
+                WHERE c.user_id = %s FOR UPDATE
+                """,
+                (self.user_id,),
+            )
+            items = cursor.fetchall()
+            if not items:
+                raise Exception("Cart became empty.")
 
-        # Move cart items to order_items
-        for p in self.cart_items:
-            pid, qty, name, price = p
-            cursor.execute("""
-                INSERT INTO order_items (order_id, product_id, quantity, price)
-                VALUES (%s, %s, %s, %s)
-            """, (order_id, pid, qty, price))
+            # Stock check
+            insufficient = []
+            order_total = 0.0
+            for pid, qty, name, price, stock in items:
+                if qty > (stock or 0):
+                    insufficient.append(f"{name} (have {stock}, need {qty})")
+                order_total += float(price) * int(qty)
+            if insufficient:
+                raise Exception("Insufficient stock for: \n- " + "\n- ".join(insufficient))
 
-        # Clear cart
-        cursor.execute("DELETE FROM cart WHERE user_id=%s", (self.user_id,))
-        db.commit()
-        db.close()
+            # Create order (status Processing after payment)
+            cursor.execute(
+                "INSERT INTO orders (user_id, total_amount, status) VALUES (%s, %s, 'Pending')",
+                (self.user_id, order_total),
+            )
+            order_id = cursor.lastrowid
 
-        messagebox.showinfo("Success", "Order placed successfully!")
-        self.destroy()
+            # Insert order_items and decrement stock
+            for pid, qty, name, price, stock in items:
+                cursor.execute(
+                    """
+                    INSERT INTO order_items (order_id, product_id, quantity, price)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (order_id, pid, qty, price),
+                )
+                cursor.execute(
+                    "UPDATE product SET stock = stock - %s WHERE product_id=%s",
+                    (qty, pid),
+                )
+
+            # Payment record (assume completed for demo)
+            cursor.execute(
+                """
+                INSERT INTO payment (order_id, payment_method, amount, status)
+                VALUES (%s, 'Card', %s, 'Completed')
+                """,
+                (order_id, order_total),
+            )
+
+            # Clear cart
+            cursor.execute("DELETE FROM cart WHERE user_id=%s", (self.user_id,))
+
+            # Mark order Processing to indicate payment captured
+            cursor.execute("UPDATE orders SET status='Processing' WHERE order_id=%s", (order_id,))
+
+            db.commit()
+
+            # Update analytics outside transaction
+            try:
+                record_order_effects(order_id)
+            except Exception:
+                pass
+
+            messagebox.showinfo("Success", f"Order #{order_id} placed successfully!")
+            self.destroy()
+        except Exception as err:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            messagebox.showerror("Checkout Failed", str(err))
+        finally:
+            db.close()

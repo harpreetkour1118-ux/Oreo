@@ -1,7 +1,11 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 from PIL import Image, ImageTk
 import mysql.connector
+from database import increment_login_counter
+
+from admin import AdminPanel
+
 def login_window(on_success):
     # ---------- Database Connection ----------
     def connect_db():
@@ -37,6 +41,13 @@ def login_window(on_success):
         if not username or not password:
             messagebox.showwarning("Input Error", "Please fill all fields!")
             return
+        
+        if username == "admin" and password == "admin":
+            root.destroy()
+            admin_panel = AdminPanel()
+            admin_panel.mainloop()
+            return
+
         db = connect_db()
         cursor = db.cursor()
         cursor.execute("SELECT user_id, username FROM users WHERE username=%s AND password=%s",
@@ -45,10 +56,44 @@ def login_window(on_success):
         db.close()
         if user:
             user_id, username = user
-            root.destroy()  # Close login window
-            on_success(user_id, username)  # Call Dashboard callback
+            try:
+                increment_login_counter(user_id)
+            except Exception:
+                pass
+            root.destroy()
+            on_success(user_id, username)
         else:
             messagebox.showerror("Error", "Invalid username or password")
+    # ---------- Forgot Password Function ----------
+    def forgot_password():
+        email = simpledialog.askstring("Forgot Password", "Enter your Gmail address:")
+        if email is None:
+            return
+        email = email.strip()
+        if not email:
+            messagebox.showwarning("Input Error", "Email cannot be empty.")
+            return
+        if not email.lower().endswith("@gmail.com"):
+            messagebox.showwarning("Input Error", "Please enter a valid Gmail address.")
+            return
+
+        try:
+            db = connect_db()
+            cursor = db.cursor()
+            cursor.execute("SELECT password FROM users WHERE email=%s", (email,))
+            row = cursor.fetchone()
+            if row:
+                saved_password = row[0]
+                messagebox.showinfo("Your Password", f"Password for {email}:\n{saved_password}")
+            else:
+                messagebox.showerror("Not Found", "No user found with that Gmail address.")
+        except mysql.connector.Error as err:
+            messagebox.showerror("Error", f"Database Error: {err}")
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
     # ---------- Register Function ----------
     def register_user():
         fullname = full_name_entry.get()
@@ -91,6 +136,8 @@ def login_window(on_success):
               width=20, relief="flat", command=login_user).pack(pady=10)
     tk.Button(login_frame, text="Register", bg="white", fg="#7B0000", font=("Arial", 10, "bold"),
               relief="flat", command=open_register).pack(pady=5)
+    tk.Button(login_frame, text="Forgot Password?", bg="white", fg="#7B0000", font=("Arial", 10, "bold"),
+              relief="flat", command=forgot_password).pack(pady=5)
     login_frame.pack(pady=20)
     # ---------- Register Frame ----------
     register_frame = tk.Frame(root, bg="white")

@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 import mysql.connector
+from database import get_product_rating, add_or_update_rating
 from cart import CartWindow
 import os
 from login import login_window
@@ -102,7 +103,7 @@ class Dashboard(tk.Tk):
             frame = tk.Frame(self.products_frame, bg="white", padx=20, pady=20)
             frame.grid(row=i // columns, column=i % columns)
 
-            # --- Load Image (local path or URL) ---
+            # --- Load Image  ---
             try:
                 if product[4] and os.path.exists(product[4]):
                     # Local file
@@ -120,16 +121,160 @@ class Dashboard(tk.Tk):
             lbl_img = tk.Label(frame, image=photo, bg="white")
             lbl_img.image = photo  
             lbl_img.pack()
+            lbl_img.bind("<Button-1>", lambda e, p=product: self.open_product_detail(p))
 
-            tk.Label(frame, text=product[1], bg="white",
-                     font=("Arial", 10, "bold")).pack(pady=2)
+            name_lbl = tk.Label(frame, text=product[1], bg="white",
+                                font=("Arial", 10, "bold"))
+            name_lbl.pack(pady=2)
+            name_lbl.bind("<Button-1>", lambda e, p=product: self.open_product_detail(p))
             tk.Label(frame, text=f"Price: ${product[3]:.2f}", bg="white",
                      font=("Arial", 10)).pack()
+            view_btn = tk.Button(frame, text="View", font=("Arial", 10, "bold"),
+                                 bg="#EFEFEF", relief="flat",
+                                 command=lambda p=product: self.open_product_detail(p))
+            view_btn.pack(pady=2)
 
             add_btn = tk.Button(frame, text="🛒", font=("Arial", 12),
                                 bg="white", relief="flat",
                                 command=lambda p=product: self.add_to_cart(p))
             add_btn.pack(pady=3)
+
+    # ---------- Product Detail ----------
+    def open_product_detail(self, product):
+        pid, name, description, price, image_url = product
+
+        win = tk.Toplevel(self)
+        win.title(name)
+        win.geometry("800x600")
+        win.config(bg="white")
+
+        # Header
+        header = tk.Frame(win, bg="white")
+        header.pack(fill="x", padx=20, pady=10)
+        tk.Label(header, text=name, font=("Arial", 18, "bold"), bg="white").pack(side="left")
+        tk.Label(header, text=f"${price:.2f}", font=("Arial", 14), bg="white").pack(side="right")
+
+        # Top section with image + description
+        top = tk.Frame(win, bg="white")
+        top.pack(fill="x", padx=20)
+
+        # Image
+        try:
+            if image_url and os.path.exists(image_url):
+                img = Image.open(image_url)
+            else:
+                raise Exception("No image provided")
+            img = img.resize((250, 250))
+            photo = ImageTk.PhotoImage(img)
+        except Exception:
+            img = Image.new("RGB", (250, 250), color="lightgrey")
+            photo = ImageTk.PhotoImage(img)
+        img_lbl = tk.Label(top, image=photo, bg="white")
+        img_lbl.image = photo
+        img_lbl.pack(side="left", padx=10, pady=10)
+
+        desc = tk.Text(top, height=12, width=60, wrap="word", bg="#F8F8F8")
+        desc.insert("1.0", description or "No description available.")
+        desc.config(state="disabled")
+        desc.pack(side="left", padx=10, pady=10, fill="x")
+
+        # Ratings and reviews section
+        section = tk.Frame(win, bg="white")
+        section.pack(fill="both", expand=True, padx=20, pady=10)
+
+        meta_frame = tk.Frame(section, bg="white")
+        meta_frame.pack(fill="x")
+
+        avg_var = tk.StringVar(value="Loading rating...")
+        avg_lbl = tk.Label(meta_frame, textvariable=avg_var, font=("Arial", 12, "bold"), bg="white")
+        avg_lbl.pack(side="left")
+
+        def refresh_rating_and_reviews():
+            try:
+                avg, cnt = get_product_rating(pid)
+                avg_var.set(f"Average rating: {avg:.1f} / 5  ({cnt} review{'s' if cnt != 1 else ''})")
+            except Exception:
+                avg_var.set("Average rating: N/A")
+
+            # Load latest reviews
+            for w in reviews_frame.winfo_children():
+                w.destroy()
+
+            try:
+                db = connect_db()
+                cur = db.cursor()
+                cur.execute(
+                    """
+                    SELECT u.username, r.rating, COALESCE(r.comment,''), r.created_at
+                    FROM ratings r
+                    JOIN users u ON u.user_id = r.user_id
+                    WHERE r.product_id=%s
+                    ORDER BY r.created_at DESC
+                    LIMIT 10
+                    """,
+                    (pid,),
+                )
+                rows = cur.fetchall()
+                db.close()
+            except Exception:
+                rows = []
+
+            if not rows:
+                tk.Label(reviews_frame, text="No reviews yet.", bg="white", font=("Arial", 11, "italic")).pack(anchor="w")
+            else:
+                for username, rating, comment, created_at in rows:
+                    tk.Label(
+                        reviews_frame,
+                        text=f"{username} - {rating}/5",
+                        bg="white",
+                        font=("Arial", 11, "bold"),
+                    ).pack(anchor="w")
+                    if comment:
+                        tk.Label(
+                            reviews_frame,
+                            text=comment,
+                            bg="white",
+                            wraplength=700,
+                            justify="left",
+                            font=("Arial", 11),
+                        ).pack(anchor="w", pady=(0, 6))
+
+        reviews_frame = tk.Frame(section, bg="white")
+        reviews_frame.pack(fill="both", expand=True, pady=10)
+
+        # Rating submission form
+        form = tk.Frame(section, bg="#F2F2F2")
+        form.pack(fill="x", pady=5)
+
+        tk.Label(form, text="Your rating (1-5):", bg="#F2F2F2", font=("Arial", 11, "bold")).pack(side="left", padx=10, pady=10)
+        rating_var = tk.IntVar(value=5)
+        rating_spin = tk.Spinbox(form, from_=1, to=5, width=5, textvariable=rating_var)
+        rating_spin.pack(side="left")
+
+        tk.Label(form, text="Comment:", bg="#F2F2F2", font=("Arial", 11, "bold")).pack(side="left", padx=(20, 5))
+        comment_entry = tk.Entry(form, width=60)
+        comment_entry.pack(side="left", padx=5)
+
+        def submit_rating():
+            try:
+                r = int(rating_var.get())
+            except Exception:
+                messagebox.showerror("Error", "Rating must be a number between 1 and 5")
+                return
+            cmt = comment_entry.get().strip()
+            try:
+                add_or_update_rating(self.user_id, pid, r, cmt if cmt else None)
+                messagebox.showinfo("Thanks!", "Your rating has been submitted.")
+                comment_entry.delete(0, tk.END)
+                refresh_rating_and_reviews()
+            except Exception as err:
+                messagebox.showerror("Error", f"Unable to submit rating: {err}")
+
+        tk.Button(form, text="Submit", bg="#7B0000", fg="white", font=("Arial", 10, "bold"),
+                  relief="flat", command=submit_rating).pack(side="left", padx=10)
+
+        # Initial load
+        refresh_rating_and_reviews()
 
     # ---------- Add to Cart ----------
     def add_to_cart(self, product):
