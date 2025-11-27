@@ -1,65 +1,82 @@
 import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
-import mysql.connector
-from database import get_product_rating, add_or_update_rating
+from database import get_product_rating, add_or_update_rating, connect_db
 from cart import CartWindow
 import os
 from login import login_window
 
-# ---------- Database Connection ----------
-def connect_db():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="mkkapri",
-        database="oreo"
-    )
+# Theme
+BG_MAIN = "#050505"
+BG_CARD = "#151515"
+FG_TEXT = "#FFFFFF"
+FG_MUTED = "#AAAAAA"
+ACCENT = "#FF3B3B"
+ACCENT_SOFT = "#FF7777"
 
-# ---------- Dashboard ----------
+
+# ---------- Dashboard (POS Screen) ----------
 class Dashboard(tk.Tk):
     def __init__(self, user_id, username):
         super().__init__()
-        self.title("Oreo Dashboard")
+        self.title("Oreo POS - Dashboard")
         self.state("zoomed")
-        self.config(bg="white")
+        self.config(bg=BG_MAIN)
         self.username = username
-        self.user_id = user_id
+        self.user_id = user_id  # staff id
 
         # Logo
         try:
             img = Image.open("oreo.png")
             img = img.resize((80, 80))
             self.logo = ImageTk.PhotoImage(img)
-        except:
+        except Exception:
             self.logo = None
 
         # Header
-        header = tk.Frame(self, bg="white")
+        header = tk.Frame(self, bg=BG_MAIN)
         header.pack(fill="x", pady=10, padx=20)
 
         if self.logo:
-            tk.Label(header, image=self.logo, bg="white").pack(side="left")
+            tk.Label(header, image=self.logo, bg=BG_MAIN).pack(side="left")
 
-        tk.Label(header, text=f"Welcome To Oreo, {username}", bg="white",
-                 font=("Arial", 14, "bold")).pack(side="left", padx=10)
+        tk.Label(
+            header,
+            text=f"Oreo POS  |  Staff: {username}",
+            bg=BG_MAIN,
+            fg=FG_TEXT,
+            font=("Arial", 16, "bold"),
+        ).pack(side="left", padx=10)
 
-        cart_btn = tk.Button(header, text="🛒", bg="white", font=("Arial", 16),
-                             relief="flat", command=self.open_cart)
+        cart_btn = tk.Button(
+            header,
+            text="🛒 Cart",
+            bg=BG_MAIN,
+            fg=ACCENT,
+            font=("Arial", 12, "bold"),
+            relief="flat",
+            command=self.open_cart,
+        )
         cart_btn.pack(side="right", padx=10)
 
-        logout_btn = tk.Button(header, text="Log Out", bg="#7B0000", fg="white",
-                               font=("Arial", 10, "bold"), relief="flat",
-                               command=self.logout)
+        logout_btn = tk.Button(
+            header,
+            text="Log Out",
+            bg=ACCENT,
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief="flat",
+            command=self.logout,
+        )
         logout_btn.pack(side="right", padx=10)
 
         # ---------- Scrollable Products Frame ----------
-        container = tk.Frame(self)
-        container.pack(fill="both", expand=True, pady=20)
+        container = tk.Frame(self, bg=BG_MAIN)
+        container.pack(fill="both", expand=True, pady=20, padx=20)
 
-        self.canvas = tk.Canvas(container, bg="white")
+        self.canvas = tk.Canvas(container, bg=BG_MAIN, highlightthickness=0)
         scrollbar = tk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
-        self.products_frame = tk.Frame(self.canvas, bg="white")
+        self.products_frame = tk.Frame(self.canvas, bg=BG_MAIN)
 
         # Configure scrolling region
         self.products_frame.bind(
@@ -83,7 +100,7 @@ class Dashboard(tk.Tk):
 
     # ---------- Mousewheel scrolling ----------
     def _on_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     # ---------- Load Products ----------
     def load_products(self):
@@ -93,51 +110,81 @@ class Dashboard(tk.Tk):
         products = cursor.fetchall()
         db.close()
 
+        for widget in self.products_frame.winfo_children():
+            widget.destroy()
+
         if not products:
-            tk.Label(self.products_frame, text="No products found!", bg="white",
-                     font=("Arial", 12, "bold")).pack()
+            tk.Label(
+                self.products_frame,
+                text="No products found!",
+                bg=BG_MAIN,
+                fg=FG_TEXT,
+                font=("Arial", 12, "bold"),
+            ).pack()
             return
 
         columns = 5
         for i, product in enumerate(products):
-            frame = tk.Frame(self.products_frame, bg="white", padx=20, pady=20)
-            frame.grid(row=i // columns, column=i % columns)
+            frame = tk.Frame(self.products_frame, bg=BG_CARD, padx=20, pady=20, bd=0, relief="flat")
+            frame.grid(row=i // columns, column=i % columns, padx=10, pady=10)
 
             # --- Load Image  ---
             try:
                 if product[4] and os.path.exists(product[4]):
-                    # Local file
                     img = Image.open(product[4])
                 else:
                     raise Exception("No image provided")
-
                 img = img.resize((150, 150))
                 photo = ImageTk.PhotoImage(img)
             except Exception as e:
                 print(f"Error loading image for {product[1]}: {e}")
-                img = Image.new("RGB", (150, 150), color="lightgrey")
+                img = Image.new("RGB", (150, 150), color="grey")
                 photo = ImageTk.PhotoImage(img)
 
-            lbl_img = tk.Label(frame, image=photo, bg="white")
-            lbl_img.image = photo  
+            lbl_img = tk.Label(frame, image=photo, bg=BG_CARD)
+            lbl_img.image = photo
             lbl_img.pack()
             lbl_img.bind("<Button-1>", lambda e, p=product: self.open_product_detail(p))
 
-            name_lbl = tk.Label(frame, text=product[1], bg="white",
-                                font=("Arial", 10, "bold"))
+            name_lbl = tk.Label(
+                frame,
+                text=product[1],
+                bg=BG_CARD,
+                fg=FG_TEXT,
+                font=("Arial", 10, "bold"),
+            )
             name_lbl.pack(pady=2)
             name_lbl.bind("<Button-1>", lambda e, p=product: self.open_product_detail(p))
-            tk.Label(frame, text=f"Price: ${product[3]:.2f}", bg="white",
-                     font=("Arial", 10)).pack()
-            view_btn = tk.Button(frame, text="View", font=("Arial", 10, "bold"),
-                                 bg="#EFEFEF", relief="flat",
-                                 command=lambda p=product: self.open_product_detail(p))
-            view_btn.pack(pady=2)
 
-            add_btn = tk.Button(frame, text="🛒", font=("Arial", 12),
-                                bg="white", relief="flat",
-                                command=lambda p=product: self.add_to_cart(p))
-            add_btn.pack(pady=3)
+            tk.Label(
+                frame,
+                text=f"${product[3]:.2f}",
+                bg=BG_CARD,
+                fg=ACCENT_SOFT,
+                font=("Arial", 10, "bold"),
+            ).pack()
+
+            view_btn = tk.Button(
+                frame,
+                text="View",
+                font=("Arial", 10, "bold"),
+                bg="#252525",
+                fg=FG_TEXT,
+                relief="flat",
+                command=lambda p=product: self.open_product_detail(p),
+            )
+            view_btn.pack(pady=2, fill="x")
+
+            add_btn = tk.Button(
+                frame,
+                text="Add to Cart 🛒",
+                font=("Arial", 10, "bold"),
+                bg=ACCENT,
+                fg="white",
+                relief="flat",
+                command=lambda p=product: self.add_to_cart(p),
+            )
+            add_btn.pack(pady=3, fill="x")
 
     # ---------- Product Detail ----------
     def open_product_detail(self, product):
@@ -146,16 +193,28 @@ class Dashboard(tk.Tk):
         win = tk.Toplevel(self)
         win.title(name)
         win.geometry("800x600")
-        win.config(bg="white")
+        win.config(bg=BG_MAIN)
 
         # Header
-        header = tk.Frame(win, bg="white")
+        header = tk.Frame(win, bg=BG_MAIN)
         header.pack(fill="x", padx=20, pady=10)
-        tk.Label(header, text=name, font=("Arial", 18, "bold"), bg="white").pack(side="left")
-        tk.Label(header, text=f"${price:.2f}", font=("Arial", 14), bg="white").pack(side="right")
+        tk.Label(
+            header,
+            text=name,
+            font=("Arial", 18, "bold"),
+            bg=BG_MAIN,
+            fg=FG_TEXT,
+        ).pack(side="left")
+        tk.Label(
+            header,
+            text=f"${price:.2f}",
+            font=("Arial", 14),
+            bg=BG_MAIN,
+            fg=ACCENT_SOFT,
+        ).pack(side="right")
 
         # Top section with image + description
-        top = tk.Frame(win, bg="white")
+        top = tk.Frame(win, bg=BG_MAIN)
         top.pack(fill="x", padx=20)
 
         # Image
@@ -167,26 +226,40 @@ class Dashboard(tk.Tk):
             img = img.resize((250, 250))
             photo = ImageTk.PhotoImage(img)
         except Exception:
-            img = Image.new("RGB", (250, 250), color="lightgrey")
+            img = Image.new("RGB", (250, 250), color="grey")
             photo = ImageTk.PhotoImage(img)
-        img_lbl = tk.Label(top, image=photo, bg="white")
+        img_lbl = tk.Label(top, image=photo, bg=BG_MAIN)
         img_lbl.image = photo
         img_lbl.pack(side="left", padx=10, pady=10)
 
-        desc = tk.Text(top, height=12, width=60, wrap="word", bg="#F8F8F8")
+        desc = tk.Text(
+            top,
+            height=12,
+            width=60,
+            wrap="word",
+            bg=BG_CARD,
+            fg=FG_TEXT,
+            bd=0,
+        )
         desc.insert("1.0", description or "No description available.")
         desc.config(state="disabled")
         desc.pack(side="left", padx=10, pady=10, fill="x")
 
         # Ratings and reviews section
-        section = tk.Frame(win, bg="white")
+        section = tk.Frame(win, bg=BG_MAIN)
         section.pack(fill="both", expand=True, padx=20, pady=10)
 
-        meta_frame = tk.Frame(section, bg="white")
+        meta_frame = tk.Frame(section, bg=BG_MAIN)
         meta_frame.pack(fill="x")
 
         avg_var = tk.StringVar(value="Loading rating...")
-        avg_lbl = tk.Label(meta_frame, textvariable=avg_var, font=("Arial", 12, "bold"), bg="white")
+        avg_lbl = tk.Label(
+            meta_frame,
+            textvariable=avg_var,
+            font=("Arial", 12, "bold"),
+            bg=BG_MAIN,
+            fg=ACCENT_SOFT,
+        )
         avg_lbl.pack(side="left")
 
         def refresh_rating_and_reviews():
@@ -220,39 +293,74 @@ class Dashboard(tk.Tk):
                 rows = []
 
             if not rows:
-                tk.Label(reviews_frame, text="No reviews yet.", bg="white", font=("Arial", 11, "italic")).pack(anchor="w")
+                tk.Label(
+                    reviews_frame,
+                    text="No reviews yet.",
+                    bg=BG_MAIN,
+                    fg=FG_MUTED,
+                    font=("Arial", 11, "italic"),
+                ).pack(anchor="w")
             else:
                 for username, rating, comment, created_at in rows:
                     tk.Label(
                         reviews_frame,
                         text=f"{username} - {rating}/5",
-                        bg="white",
+                        bg=BG_MAIN,
+                        fg=FG_TEXT,
                         font=("Arial", 11, "bold"),
                     ).pack(anchor="w")
                     if comment:
                         tk.Label(
                             reviews_frame,
                             text=comment,
-                            bg="white",
+                            bg=BG_MAIN,
+                            fg=FG_MUTED,
                             wraplength=700,
                             justify="left",
                             font=("Arial", 11),
                         ).pack(anchor="w", pady=(0, 6))
 
-        reviews_frame = tk.Frame(section, bg="white")
+        reviews_frame = tk.Frame(section, bg=BG_MAIN)
         reviews_frame.pack(fill="both", expand=True, pady=10)
 
         # Rating submission form
-        form = tk.Frame(section, bg="#F2F2F2")
+        form = tk.Frame(section, bg=BG_CARD)
         form.pack(fill="x", pady=5)
 
-        tk.Label(form, text="Your rating (1-5):", bg="#F2F2F2", font=("Arial", 11, "bold")).pack(side="left", padx=10, pady=10)
+        tk.Label(
+            form,
+            text="Your rating (1-5):",
+            bg=BG_CARD,
+            fg=FG_TEXT,
+            font=("Arial", 11, "bold"),
+        ).pack(side="left", padx=10, pady=10)
         rating_var = tk.IntVar(value=5)
-        rating_spin = tk.Spinbox(form, from_=1, to=5, width=5, textvariable=rating_var)
+        rating_spin = tk.Spinbox(
+            form,
+            from_=1,
+            to=5,
+            width=5,
+            textvariable=rating_var,
+            bg="#222222",
+            fg="white",
+            insertbackground="white",
+        )
         rating_spin.pack(side="left")
 
-        tk.Label(form, text="Comment:", bg="#F2F2F2", font=("Arial", 11, "bold")).pack(side="left", padx=(20, 5))
-        comment_entry = tk.Entry(form, width=60)
+        tk.Label(
+            form,
+            text="Comment:",
+            bg=BG_CARD,
+            fg=FG_TEXT,
+            font=("Arial", 11, "bold"),
+        ).pack(side="left", padx=(20, 5))
+        comment_entry = tk.Entry(
+            form,
+            width=60,
+            bg="#222222",
+            fg="white",
+            insertbackground="white",
+        )
         comment_entry.pack(side="left", padx=5)
 
         def submit_rating():
@@ -270,8 +378,15 @@ class Dashboard(tk.Tk):
             except Exception as err:
                 messagebox.showerror("Error", f"Unable to submit rating: {err}")
 
-        tk.Button(form, text="Submit", bg="#7B0000", fg="white", font=("Arial", 10, "bold"),
-                  relief="flat", command=submit_rating).pack(side="left", padx=10)
+        tk.Button(
+            form,
+            text="Submit",
+            bg=ACCENT,
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief="flat",
+            command=submit_rating,
+        ).pack(side="left", padx=10)
 
         # Initial load
         refresh_rating_and_reviews()
@@ -281,22 +396,53 @@ class Dashboard(tk.Tk):
         product_id = product[0]
         db = connect_db()
         cursor = db.cursor()
+        try:
+            db.start_transaction()
+            # Check and lock product stock
+            cursor.execute(
+                "SELECT stock, name FROM product WHERE product_id=%s FOR UPDATE",
+                (product_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise Exception("Product not found.")
+            stock, pname = row
+            if (stock or 0) <= 0:
+                raise Exception(f"{pname} is out of stock.")
 
-        cursor.execute("SELECT quantity FROM cart WHERE user_id=%s AND product_id=%s",
-                       (self.user_id, product_id))
-        result = cursor.fetchone()
+            # Decrement stock to reserve one unit
+            cursor.execute(
+                "UPDATE product SET stock = stock - 1 WHERE product_id=%s",
+                (product_id,),
+            )
 
-        if result:
-            new_qty = result[0] + 1
-            cursor.execute("UPDATE cart SET quantity=%s WHERE user_id=%s AND product_id=%s",
-                           (new_qty, self.user_id, product_id))
-        else:
-            cursor.execute("INSERT INTO cart (user_id, product_id, quantity) VALUES (%s, %s, %s)",
-                           (self.user_id, product_id, 1))
+            # Upsert into cart (lock the row if exists)
+            cursor.execute(
+                "SELECT quantity FROM cart WHERE user_id=%s AND product_id=%s FOR UPDATE",
+                (self.user_id, product_id),
+            )
+            result = cursor.fetchone()
+            if result:
+                cursor.execute(
+                    "UPDATE cart SET quantity = quantity + 1 WHERE user_id=%s AND product_id=%s",
+                    (self.user_id, product_id),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO cart (user_id, product_id, quantity) VALUES (%s, %s, %s)",
+                    (self.user_id, product_id, 1),
+                )
 
-        db.commit()
-        db.close()
-        messagebox.showinfo("Cart", f"Added {product[1]} to cart!")
+            db.commit()
+            messagebox.showinfo("Cart", f"Added {product[1]} to cart!")
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            messagebox.showerror("Cart", str(e))
+        finally:
+            db.close()
 
     # ---------- Open Cart ----------
     def open_cart(self):
@@ -306,9 +452,11 @@ class Dashboard(tk.Tk):
     def logout(self):
         self.destroy()
 
+
 def start_dashboard(user_id, username):
     app = Dashboard(user_id, username)
     app.mainloop()
+
 
 if __name__ == "__main__":
     login_window(on_success=start_dashboard)
